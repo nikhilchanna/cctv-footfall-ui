@@ -32,6 +32,7 @@ body {
   border-radius: 16px;
   box-shadow: var(--glass-shadow);
   padding: 24px;
+  box-sizing: border-box;
 }
 
 input, select {
@@ -44,6 +45,115 @@ input, select {
   outline: none;
   transition: all 0.2s ease-in-out;
   color-scheme: dark;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dashboard-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  box-sizing: border-box;
+  width: 100%;
+}
+.header-title {
+  margin: 0;
+  font-size: 2.5rem;
+  font-weight: 800;
+  background: linear-gradient(to right, #60a5fa, #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.controls-container {
+  display: flex;
+  gap: 24px;
+  margin: 20px 0;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 150px;
+}
+.control-group.large {
+  min-width: 200px;
+}
+.summary-cards-container {
+  display: flex;
+  gap: 20px;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.summary-card-wrapper {
+  flex: 1;
+  min-width: 200px;
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 20px 10px;
+  }
+  .header-title {
+    font-size: 1.8rem;
+  }
+  .controls-container {
+    gap: 16px;
+  }
+  .control-group, .control-group.large {
+    min-width: 100%;
+  }
+  .summary-card-wrapper {
+    min-width: calc(50% - 10px);
+  }
+  .glass-panel {
+    padding: 16px;
+  }
+  .desktop-video {
+    display: none !important;
+  }
+  .mobile-video {
+    display: block !important;
+    max-width: 100% !important;
+    margin-bottom: 20px;
+  }
+}
+
+@media (min-width: 769px) {
+  .mobile-video {
+    display: none !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .summary-card-wrapper {
+    min-width: 100%;
+  }
+}
+
+.chart-scroll-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  padding-bottom: 8px; /* space for scrollbar */
+}
+
+/* Custom scrollbar for horizontal scrolling chart */
+.chart-scroll-container::-webkit-scrollbar {
+  height: 8px;
+}
+.chart-scroll-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+.chart-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+.chart-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 input:focus, select:focus {
