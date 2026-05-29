@@ -46,6 +46,7 @@ export const getOccupancy = () => api.get('/dashboard/occupancy');
 
 export const getCameras = () => axios.get(`http://${API_HOST}:8000/config`);
 export const updateCameras = (configData) => axios.post(`http://${API_HOST}:8000/config`, configData);
+export const connectDvr = (dvrData) => axios.post(`http://${API_HOST}:8000/dvr/connect`, dvrData);
 
 // User Management
 export const getUsers = () => api.get('/users');
