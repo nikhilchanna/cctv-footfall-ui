@@ -4,7 +4,7 @@ import axios from 'axios';
 const API_HOST = window.location.hostname;
 
 const api = axios.create({
-  baseURL: `http://${API_HOST}:8080/api/v1`,
+  baseURL: `http://${API_HOST}:8081/api/v1`,
 });
 
 // Add a request interceptor to inject the JWT token
@@ -16,11 +16,11 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Add a response interceptor to handle 401 errors
+// Add a response interceptor to handle 401 and 403 errors
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    if (error.response && (error.response.status === 401 || error.response.status === 403)) {
       localStorage.removeItem('token');
       window.location.reload();
     }
@@ -45,6 +45,7 @@ export const getTrend = (cctvId, interval, startTime, endTime) =>
 export const getOccupancy = () => api.get('/dashboard/occupancy');
 
 export const getCameras = () => axios.get(`http://${API_HOST}:8000/config`);
+export const updateCameras = (configData) => axios.post(`http://${API_HOST}:8000/config`, configData);
 
 // User Management
 export const getUsers = () => api.get('/users');
