@@ -14,7 +14,19 @@ const Login = ({ setToken }) => {
       localStorage.setItem('token', token);
       setToken(token);
     } catch (err) {
-      setError('Invalid email or password');
+      if (!err.response) {
+        setError(
+          `Cannot reach API at port 8081 (${err.message || 'network error'}). Is the Java server running?`
+        );
+      } else if (err.response.status === 401) {
+        setError(
+          'Invalid email or password. Users must exist in the server DB with a BCrypt password — register once via POST /api/v1/auth/register or use the default seed account after a fresh DB.'
+        );
+      } else if (!err.response?.data?.token) {
+        setError(err.response?.data?.message || err.response?.data || `Login failed (${err.response?.status})`);
+      } else {
+        setError('Login failed — unexpected response from server');
+      }
     }
   };
 
@@ -22,6 +34,9 @@ const Login = ({ setToken }) => {
     <div className="dashboard-container" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '80vh' }}>
       <div className="glass-panel" style={{ width: '100%', maxWidth: '400px' }}>
         <h2 className="header-title" style={{ fontSize: '1.8rem', textAlign: 'center', marginBottom: '20px' }}>Sign In</h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '16px' }}>
+          First time on an empty DB: <strong>admin@footfall.local</strong> / <strong>admin123</strong> (after server restart), or register via <code>/api/v1/auth/register</code>.
+        </p>
         {error && <div style={{ color: '#ef4444', marginBottom: '15px', textAlign: 'center' }}>{error}</div>}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
           <div>

@@ -56,6 +56,24 @@ export const startDvrPreview = (channelId) =>
 export const stopDvrPreview = () =>
   axios.post(`http://${API_HOST}:8000/dvr/preview/stop`);
 
+export const getProcessorStatus = (cctvId) =>
+  axios.get(`http://${API_HOST}:8000/processor/${cctvId}/status`);
+
+export const getMinutePeaks = (cctvId, limit = 15) =>
+  axios.get(`http://${API_HOST}:8000/processor/${cctvId}/minute-peaks`, { params: { limit } });
+
+export const getCamerasStatus = () =>
+  axios.get(`http://${API_HOST}:8000/cameras/status`);
+
+export const getProcessorThumbnailUrl = (cctvId) =>
+  `http://${API_HOST}:8000/processor/${cctvId}/thumbnail`;
+
+export const getServerPeakImages = (cctvId, limit = 15) =>
+  api.get('/peak-images', { params: { cctvId, limit } });
+
+export const getServerPeakImageUrl = (relativePath) =>
+  `http://${API_HOST}:8081/api/v1/peak-images/file?path=${encodeURIComponent(relativePath)}`;
+
 // User Management
 export const getUsers = () => api.get('/users');
 export const createUser = (email, password, role) => api.post('/users', { email, password, role });

@@ -1,13 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import './App.css';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import UserManagement from './pages/UserManagement';
 import DvrConfiguration from './pages/DvrConfiguration';
+import Analytics from './pages/Analytics';
+
+const ANALYTICS_FOCUS_KEY = 'analytics_focus_cam';
 
 function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
-  const [view, setView] = useState('dashboard'); // 'dashboard', 'users', or 'dvr'
+  const [view, setView] = useState('dashboard'); // dashboard | analytics | users | dvr
+  const [analyticsFocusCam, setAnalyticsFocusCam] = useState(
+    () => sessionStorage.getItem(ANALYTICS_FOCUS_KEY) || ''
+  );
 
   if (!token) {
     return (
@@ -40,26 +46,65 @@ function App() {
   if (view === 'dvr') {
     return (
       <div className="App">
-        <DvrConfiguration onBack={() => setView('dashboard')} />
+        <DvrConfiguration
+          onBack={() => setView('dashboard')}
+          onConfigured={(camId) => {
+            sessionStorage.setItem(ANALYTICS_FOCUS_KEY, camId);
+            setAnalyticsFocusCam(camId);
+            setView('analytics');
+          }}
+        />
       </div>
     );
   }
 
+  if (view === 'analytics') {
+    return (
+      <div className="App">
+        <Analytics
+          focusCamId={analyticsFocusCam}
+          onBack={() => setView('dashboard')}
+        />
+      </div>
+    );
+  }
+
+  const navBtn = {
+    background: 'var(--glass-bg)',
+    border: '1px solid var(--glass-border)',
+    color: 'white',
+    padding: '5px 10px',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    transition: '0.3s',
+  };
+
   return (
     <div className="App">
       <div style={{ padding: '10px 20px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+        <button
+          type="button"
+          onClick={() => setView('analytics')}
+          style={navBtn}
+          onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.1)'; }}
+          onMouseLeave={(e) => { e.target.style.background = 'var(--glass-bg)'; }}
+        >
+          Analytics
+        </button>
         <button 
+          type="button"
           onClick={() => setView('dvr')}
-          style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'white', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', transition: '0.3s' }}
-          onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
-          onMouseLeave={(e) => e.target.style.background = 'var(--glass-bg)'}
+          style={navBtn}
+          onMouseEnter={(e) => { e.target.style.background = 'rgba(255,255,255,0.1)'; }}
+          onMouseLeave={(e) => { e.target.style.background = 'var(--glass-bg)'; }}
         >
           DVR Portal
         </button>
         {isAdmin && (
           <button 
+            type="button"
             onClick={() => setView('users')}
-            style={{ background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', color: 'white', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', transition: '0.3s' }}
+            style={navBtn}
             onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
             onMouseLeave={(e) => e.target.style.background = 'var(--glass-bg)'}
           >

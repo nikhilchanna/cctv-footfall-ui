@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getCameras, updateCameras, connectDvr, getDvrSession, startDvrPreview, stopDvrPreview } from '../services/api';
+import { getCameras, updateCameras, connectDvr, getDvrSession, startDvrPreview, stopDvrPreview, getProcessorStatus } from '../services/api';
 import LineDrawViewer from '../components/LineDrawViewer';
+import { buildMergedConfig } from '../utils/cameraConfig';
 
 const API_HOST = window.location.hostname;
 const DVR_SESSION_KEY = 'dvr_session';
 
-const DvrConfiguration = ({ onBack }) => {
+const DvrConfiguration = ({ onBack, onConfigured }) => {
   // Connection details
   const [dvrIp, setDvrIp] = useState('demo');
   const [username, setUsername] = useState('admin');
@@ -33,6 +34,7 @@ const DvrConfiguration = ({ onBack }) => {
   // Line coords (natural resolution)
   const [lineCoords, setLineCoords] = useState({ x1: 50, y1: 200, x2: 590, y2: 200 });
   const [sessionRestored, setSessionRestored] = useState(false);
+  const [processorStatus, setProcessorStatus] = useState(null);
   const lineDrawRef = useRef(null);
 
   const stopPreview = async () => {
@@ -152,19 +154,15 @@ const DvrConfiguration = ({ onBack }) => {
       setUseLegacySnapshot(true);
 
       try {
-        const updatedConfig = {
-          config_data: {
-            cameras: [
-              {
-                id: 'custom',
-                name: cameraName || 'Custom Camera',
-                rtsp_url: customUrl,
-                line_coords: lineCoords,
-                window_size: 10
-              }
-            ]
-          }
+        const newCam = {
+          id: 'custom',
+          name: cameraName || 'Custom Camera',
+          rtsp_url: customUrl,
+          source_type: 'rtsp',
+          line_coords: lineCoords,
+          window_size: 10,
         };
+        const updatedConfig = buildMergedConfig(currentConfig, [newCam], undefined);
 
         await updateCameras(updatedConfig);
         setCurrentConfig(updatedConfig.config_data);
@@ -250,6 +248,31 @@ const DvrConfiguration = ({ onBack }) => {
     };
   }, [step, cameraId, useLegacySnapshot]);
 
+  useEffect(() => {
+    if (step !== 3 || !cameraId) return undefined;
+
+    let cancelled = false;
+    const pollStatus = async () => {
+      try {
+        const res = await getProcessorStatus(cameraId);
+        if (!cancelled) {
+          setProcessorStatus(res.data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('Failed to load processor status', err);
+        }
+      }
+    };
+
+    pollStatus();
+    const interval = setInterval(pollStatus, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [step, cameraId]);
+
   // Save the drawn line and start live stream
   const handleSaveLine = async () => {
     setLoading(true);
@@ -262,28 +285,42 @@ const DvrConfiguration = ({ onBack }) => {
         : discoveredCameras[selectedCameraIndex] || { rtsp: 'demo', channel_id: cameraId, camera_name: cameraName };
       
       const coords = lineDrawRef.current?.getLineCoords() || lineCoords;
+      const channelId = cam.channel_id || cameraId;
+      const subChannelId = channelId.endsWith('01')
+        ? `${channelId.slice(0, -2)}02`
+        : channelId;
 
-      const finalConfig = {
-        config_data: {
-          cameras: [
-            {
-              id: cam.channel_id || cameraId,
-              name: cam.camera_name || cameraName,
-              rtsp_url: cam.rtsp,
-              line_coords: coords,
-              window_size: 10
-            }
-          ]
-        }
+      const newCam = {
+        id: channelId,
+        name: cam.camera_name || cameraName,
+        source_type: useCustomUrl ? 'rtsp' : (dvrIp === 'demo' ? 'demo' : 'isapi'),
+        channel_id: subChannelId,
+        channel: cam.channel || Math.floor(parseInt(channelId, 10) / 100) || 1,
+        stream_type: 2,
+        poll_fps: 7,
+        rtsp_url: cam.rtsp,
+        line_coords: coords,
+        window_size: 10,
       };
+
+      const dvrBlock =
+        useCustomUrl || dvrIp === 'demo'
+          ? undefined
+          : { ip: dvrIp, username, password };
+
+      const finalConfig = buildMergedConfig(currentConfig, [newCam], dvrBlock);
 
       await updateCameras(finalConfig);
       setCurrentConfig(finalConfig.config_data);
       setSuccessMsg('Line configuration saved and active!');
       setTimeout(() => {
-        setStep(3); // Go to Live Stream
         setLoading(false);
-      }, 1000);
+        if (onConfigured) {
+          onConfigured(channelId);
+        } else {
+          setStep(3);
+        }
+      }, 800);
     } catch (err) {
       setErrorMsg(err.message || 'Failed to save configuration');
       setLoading(false);
@@ -585,7 +622,7 @@ const DvrConfiguration = ({ onBack }) => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
             <h2 style={{ margin: 0, fontSize: '1.4rem' }}>Live AI Processing Feed ({cameraName})</h2>
             <div style={{ background: 'rgba(16,185,129,0.2)', color: 'var(--accent-green)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>
-              ● LIVE STREAMING (LOW LATENCY)
+              ● ISAPI SNAPSHOT ANALYTICS
             </div>
           </div>
           
@@ -600,6 +637,79 @@ const DvrConfiguration = ({ onBack }) => {
               }}
             />
           </div>
+
+          {processorStatus && (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: '12px',
+              marginBottom: '20px',
+              padding: '16px',
+              borderRadius: '12px',
+              border: '1px solid var(--glass-border)',
+              background: 'rgba(255,255,255,0.03)'
+            }}>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Source</div>
+                <div style={{ fontWeight: 600 }}>{processorStatus.source_type || '—'} @ {processorStatus.stream_fps ?? 7} FPS</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Frames this minute</div>
+                <div style={{ fontWeight: 600 }}>{processorStatus.frames_this_minute ?? 0}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Peak people (current min)</div>
+                <div style={{ fontWeight: 600 }}>{processorStatus.current_peak_people ?? 0}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Window IN / OUT</div>
+                <div style={{ fontWeight: 600 }}>{processorStatus.window_in ?? 0} / {processorStatus.window_out ?? 0}</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Snapshot latency</div>
+                <div style={{ fontWeight: 600 }}>{processorStatus.last_snapshot_latency_ms ?? 0} ms</div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Poll failures</div>
+                <div style={{ fontWeight: 600, color: (processorStatus.consecutive_failures || 0) > 0 ? '#fca5a5' : 'inherit' }}>
+                  {processorStatus.consecutive_failures ?? 0}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Watermark</div>
+                <div style={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                  {processorStatus.cursor?.last_processed_at
+                    ? new Date(processorStatus.cursor.last_processed_at).toLocaleTimeString()
+                    : '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Mode</div>
+                <div style={{ fontWeight: 600 }}>{processorStatus.cursor?.mode || 'live'}</div>
+              </div>
+              {processorStatus.last_saved_peak && (
+                <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                  {processorStatus.last_saved_peak.image_path && (
+                    <img
+                      src={`http://${API_HOST}:8000/media/${processorStatus.last_saved_peak.image_path}?t=${Date.now()}`}
+                      alt="Last minute peak"
+                      style={{ width: '96px', height: '54px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--glass-border)' }}
+                    />
+                  )}
+                  <div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>Last saved minute peak</div>
+                    <div style={{ fontWeight: 600 }}>
+                      {processorStatus.last_saved_peak.people_count} people
+                      {' · '}
+                      {processorStatus.last_saved_peak.minute_bucket
+                        ? new Date(processorStatus.last_saved_peak.minute_bucket).toLocaleString()
+                        : '—'}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <button 

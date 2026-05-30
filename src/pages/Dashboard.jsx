@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getSummary, getTrend, getCameras } from '../services/api';
+import { getSummary, getTrend, getCameras, getProcessorThumbnailUrl } from '../services/api';
 import Controls from '../components/Controls';
 import SummaryCards from '../components/SummaryCards';
 import TrendChart from '../components/TrendChart';
@@ -27,6 +27,7 @@ const Dashboard = () => {
   const [error, setError] = useState('');
 
   const [loading, setLoading] = useState(false);
+  const [thumbTs, setThumbTs] = useState(Date.now());
 
   const fetchData = useCallback(async () => {
     try {
@@ -90,6 +91,12 @@ const Dashboard = () => {
   }, [fetchData]);
 
   useEffect(() => {
+    if (cctvId === 'ALL' || !cctvId) return undefined;
+    const id = window.setInterval(() => setThumbTs(Date.now()), 5000);
+    return () => window.clearInterval(id);
+  }, [cctvId]);
+
+  useEffect(() => {
     const fetchCameras = async () => {
       try {
         const res = await getCameras();
@@ -110,35 +117,34 @@ const Dashboard = () => {
 
   const renderVideoFeed = (className) => {
     if (cctvId === 'ALL' || cctvId === '') return null;
+    const cam = availableCameras.find((c) => c.id === cctvId);
+    if (!cam) return null;
     return (
-      <div className={className} style={{ borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--glass-border)', background: '#000', width: '100%', maxWidth: '200px', aspectRatio: '16/9' }}>
-        {(() => {
-          const cam = availableCameras.find(c => c.id === cctvId);
-          if (!cam || !cam.rtsp_url) return <div style={{ color:'var(--text-secondary)', display:'flex', alignItems:'center', justifyContent:'center', height:'100%', fontSize:'0.8rem' }}>No Feed Configured</div>;
-          
-          let videoUrl = cam.rtsp_url;
-          if (videoUrl.includes(':\\') || videoUrl.includes(':/') || videoUrl.startsWith('/')) {
-            // Absolute local file path (Windows or Linux)
-            videoUrl = `http://${window.location.hostname}:8000/stream_video?path=${encodeURIComponent(videoUrl)}`;
-          } else if (!videoUrl.startsWith('http') && !videoUrl.startsWith('rtsp')) {
-            // Relative path in edge folder
-            videoUrl = `http://${window.location.hostname}:8000/media/${videoUrl}`;
-          }
-          
-          return (
-            <video 
-              src={videoUrl} 
-              autoPlay 
-              loop 
-              muted 
-              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              onError={(e) => {
-                e.target.style.display = 'none';
-                e.target.parentElement.innerHTML = '<div style="color:var(--text-secondary);display:flex;align-items:center;justify-content:center;height:100%;font-size:0.8rem;">Feed Unavailable</div>';
-              }}
-            />
-          );
-        })()}
+      <div
+        className={className}
+        style={{
+          borderRadius: '8px',
+          overflow: 'hidden',
+          border: '1px solid var(--glass-border)',
+          background: '#000',
+          width: '100%',
+          maxWidth: '200px',
+          aspectRatio: '16/9',
+        }}
+      >
+        <img
+          src={`${getProcessorThumbnailUrl(cctvId)}?t=${thumbTs}`}
+          alt={cam.name || cctvId}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          onError={(e) => {
+            e.target.style.display = 'none';
+            const parent = e.target.parentElement;
+            if (parent) {
+              parent.innerHTML =
+                '<div style="color:var(--text-secondary);display:flex;align-items:center;justify-content:center;height:100%;font-size:0.8rem;">Feed Unavailable</div>';
+            }
+          }}
+        />
       </div>
     );
   };
