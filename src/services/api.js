@@ -1,10 +1,7 @@
 import axios from 'axios';
 
-// Dynamically determine the host IP from the browser's address bar
-const API_HOST = window.location.hostname;
-
 const api = axios.create({
-  baseURL: `http://${API_HOST}:8081/api/v1`,
+  baseURL: '/api/v1',
 });
 
 // Add a request interceptor to inject the JWT token
@@ -44,35 +41,35 @@ export const getTrend = (cctvId, interval, startTime, endTime) =>
 
 export const getOccupancy = () => api.get('/dashboard/occupancy');
 
-export const getCameras = () => axios.get(`http://${API_HOST}:8000/config`);
-export const updateCameras = (configData) => axios.post(`http://${API_HOST}:8000/config`, configData);
-export const connectDvr = (dvrData) => axios.post(`http://${API_HOST}:8000/dvr/connect`, dvrData);
+export const getCameras = () => axios.get('/edge-api/config');
+export const updateCameras = (configData) => axios.post('/edge-api/config', configData);
+export const connectDvr = (dvrData) => axios.post('/edge-api/dvr/connect', dvrData);
 
-export const getDvrSession = () => axios.get(`http://${API_HOST}:8000/dvr/session`);
+export const getDvrSession = () => axios.get('/edge-api/dvr/session');
 
 export const startDvrPreview = (channelId) =>
-  axios.post(`http://${API_HOST}:8000/dvr/preview/start`, { channel_id: channelId });
+  axios.post('/edge-api/dvr/preview/start', { channel_id: channelId });
 
 export const stopDvrPreview = () =>
-  axios.post(`http://${API_HOST}:8000/dvr/preview/stop`);
+  axios.post('/edge-api/dvr/preview/stop');
 
 export const getProcessorStatus = (cctvId) =>
-  axios.get(`http://${API_HOST}:8000/processor/${cctvId}/status`);
+  axios.get(`/edge-api/processor/${cctvId}/status`);
 
 export const getMinutePeaks = (cctvId, limit = 15) =>
-  axios.get(`http://${API_HOST}:8000/processor/${cctvId}/minute-peaks`, { params: { limit } });
+  axios.get(`/edge-api/processor/${cctvId}/minute-peaks`, { params: { limit } });
 
 export const getCamerasStatus = () =>
-  axios.get(`http://${API_HOST}:8000/cameras/status`);
+  axios.get('/edge-api/cameras/status');
 
 export const getProcessorThumbnailUrl = (cctvId) =>
-  `http://${API_HOST}:8000/processor/${cctvId}/thumbnail`;
+  `/edge-api/processor/${cctvId}/thumbnail`;
 
 export const getServerPeakImages = (cctvId, limit = 15) =>
   api.get('/peak-images', { params: { cctvId, limit } });
 
 export const getServerPeakImageUrl = (relativePath) =>
-  `http://${API_HOST}:8081/api/v1/peak-images/file?path=${encodeURIComponent(relativePath)}`;
+  `/api/v1/peak-images/file?path=${encodeURIComponent(relativePath)}`;
 
 // User Management
 export const getUsers = () => api.get('/users');
