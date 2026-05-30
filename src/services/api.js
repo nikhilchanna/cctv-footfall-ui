@@ -48,6 +48,14 @@ export const getCameras = () => axios.get(`http://${API_HOST}:8000/config`);
 export const updateCameras = (configData) => axios.post(`http://${API_HOST}:8000/config`, configData);
 export const connectDvr = (dvrData) => axios.post(`http://${API_HOST}:8000/dvr/connect`, dvrData);
 
+export const getDvrSession = () => axios.get(`http://${API_HOST}:8000/dvr/session`);
+
+export const startDvrPreview = (channelId) =>
+  axios.post(`http://${API_HOST}:8000/dvr/preview/start`, { channel_id: channelId });
+
+export const stopDvrPreview = () =>
+  axios.post(`http://${API_HOST}:8000/dvr/preview/stop`);
+
 // User Management
 export const getUsers = () => api.get('/users');
 export const createUser = (email, password, role) => api.post('/users', { email, password, role });

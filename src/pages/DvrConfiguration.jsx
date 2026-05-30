@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getCameras, updateCameras, connectDvr } from '../services/api';
+import { getCameras, updateCameras, connectDvr, getDvrSession, startDvrPreview, stopDvrPreview } from '../services/api';
+import LineDrawViewer from '../components/LineDrawViewer';
 
 const API_HOST = window.location.hostname;
+const DVR_SESSION_KEY = 'dvr_session';
 
 const DvrConfiguration = ({ onBack }) => {
   // Connection details
@@ -26,21 +28,60 @@ const DvrConfiguration = ({ onBack }) => {
   const [cameraId, setCameraId] = useState('demo');
   const [cameraName, setCameraName] = useState('Demo Camera');
   const [snapshotUrl, setSnapshotUrl] = useState('');
-  
+  const [useLegacySnapshot, setUseLegacySnapshot] = useState(false);
+
   // Line coords (natural resolution)
   const [lineCoords, setLineCoords] = useState({ x1: 50, y1: 200, x2: 590, y2: 200 });
+  const [sessionRestored, setSessionRestored] = useState(false);
+  const lineDrawRef = useRef(null);
 
-  // Canvas refs and drawing state
-  const canvasRef = useRef(null);
-  const imageRef = useRef(null);
-  const [isDrawing, setIsDrawing] = useState(false);
+  const stopPreview = async () => {
+    if (!useLegacySnapshot) {
+      try {
+        await stopDvrPreview();
+      } catch (e) {
+        console.warn('Failed to stop DVR preview', e);
+      }
+    }
+  };
 
-  // Load current config on mount
   useEffect(() => {
-    const fetchConfig = async () => {
+    return () => {
+      stopDvrPreview().catch(() => {});
+    };
+  }, []);
+
+  const persistDvrSession = (ip, user, pass, cameras) => {
+    try {
+      localStorage.setItem(
+        DVR_SESSION_KEY,
+        JSON.stringify({ ip, username: user, password: pass, cameras })
+      );
+    } catch (e) {
+      console.warn('Failed to persist DVR session', e);
+    }
+  };
+
+  const applyDvrSession = (session, storedPassword) => {
+    if (!session?.connected || !session.cameras?.length) {
+      return false;
+    }
+    setDvrIp(session.ip || 'demo');
+    setUsername(session.username || 'admin');
+    if (storedPassword) {
+      setPassword(storedPassword);
+    }
+    setDiscoveredCameras(session.cameras);
+    setStep(1.5);
+    return true;
+  };
+
+  // Load camera config + restore DVR login session on mount
+  useEffect(() => {
+    const init = async () => {
       try {
         const res = await getCameras();
-        if (res.data && res.data.config_data) {
+        if (res.data?.config_data) {
           setCurrentConfig(res.data.config_data);
           const cameras = res.data.config_data.cameras || [];
           if (cameras.length > 0) {
@@ -53,10 +94,49 @@ const DvrConfiguration = ({ onBack }) => {
           }
         }
       } catch (err) {
-        console.error("Failed to load camera configuration:", err);
+        console.error('Failed to load camera configuration:', err);
+      }
+
+      let stored = null;
+      try {
+        stored = JSON.parse(localStorage.getItem(DVR_SESSION_KEY) || 'null');
+      } catch (e) {
+        stored = null;
+      }
+
+      try {
+        const sessionRes = await getDvrSession();
+        const session = sessionRes.data;
+        if (applyDvrSession(session, stored?.password)) {
+          setSessionRestored(true);
+          return;
+        }
+      } catch (err) {
+        console.warn('DVR session check failed', err);
+      }
+
+      if (stored?.ip && stored?.username && stored?.password) {
+        try {
+          const res = await connectDvr({
+            ip: stored.ip,
+            username: stored.username,
+            password: stored.password,
+          });
+          if (res.data?.success) {
+            setDvrIp(stored.ip);
+            setUsername(stored.username);
+            setPassword(stored.password);
+            setDiscoveredCameras(res.data.cameras);
+            persistDvrSession(stored.ip, stored.username, stored.password, res.data.cameras);
+            setStep(1.5);
+            setSessionRestored(true);
+          }
+        } catch (err) {
+          console.warn('DVR session restore failed', err);
+        }
       }
     };
-    fetchConfig();
+    init();
   }, []);
 
   // Handle Connect / Load Channels
@@ -69,7 +149,8 @@ const DvrConfiguration = ({ onBack }) => {
     if (useCustomUrl) {
       setCameraId('custom');
       setCameraName(cameraName || 'Custom Camera');
-      
+      setUseLegacySnapshot(true);
+
       try {
         const updatedConfig = {
           config_data: {
@@ -111,6 +192,7 @@ const DvrConfiguration = ({ onBack }) => {
 
       if (res.data && res.data.success) {
         setDiscoveredCameras(res.data.cameras);
+        persistDvrSession(dvrIp, username, password, res.data.cameras);
         setSuccessMsg(`Authenticated successfully! Auto-discovered ${res.data.cameras.length} camera channels.`);
         setSelectedCameraIndex(0);
         setTimeout(() => {
@@ -128,8 +210,8 @@ const DvrConfiguration = ({ onBack }) => {
     }
   };
 
-  // Handle Camera Select & Snapshot load
-  const handleSelectCamera = async () => {
+  // Handle Camera Select — ISAPI preview only (no RTSP processor until line is saved)
+  const handleSelectCamera = () => {
     setLoading(true);
     setErrorMsg('');
     setSuccessMsg('');
@@ -137,140 +219,50 @@ const DvrConfiguration = ({ onBack }) => {
     const cam = discoveredCameras[selectedCameraIndex];
     setCameraId(cam.channel_id);
     setCameraName(cam.camera_name);
-
-    try {
-      // Save initial config to trigger CCTVProcessor start and snapshot creation
-      const updatedConfig = {
-        config_data: {
-          cameras: [
-            {
-              id: cam.channel_id,
-              name: cam.camera_name,
-              rtsp_url: cam.rtsp,
-              line_coords: lineCoords,
-              window_size: 10
-            }
-          ]
-        }
-      };
-
-      await updateCameras(updatedConfig);
-      setCurrentConfig(updatedConfig.config_data);
-
-      setSuccessMsg(`Initializing stream for ${cam.camera_name}...`);
-
-      // Give the backend a brief moment to start the processor and save snapshot
-      setTimeout(() => {
-        setSnapshotUrl(`http://${API_HOST}:8000/media/snapshots/snapshot_${cam.channel_id}.jpg?t=${Date.now()}`);
-        setStep(2); // Go to Draw Line step
-        setLoading(false);
-        setSuccessMsg('');
-      }, 2500);
-
-    } catch (err) {
-      setErrorMsg(err.message || 'Failed to initialize selected camera channel');
-      setLoading(false);
-    }
+    setUseLegacySnapshot(false);
+    setStep(2);
+    setLoading(false);
   };
 
-  // Draw the image and the line on canvas
-  const drawCanvas = () => {
-    const canvas = canvasRef.current;
-    const img = imageRef.current;
-    if (!canvas || !img) return;
-
-    const ctx = canvas.getContext('2d');
-    
-    // Clear and draw snapshot
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    // Draw the counting line (Neon Blue)
-    ctx.beginPath();
-    ctx.moveTo(lineCoords.x1, lineCoords.y1);
-    ctx.lineTo(lineCoords.x2, lineCoords.y2);
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#00E5FF';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#00E5FF';
-    ctx.stroke();
-
-    // Draw endpoint handles
-    ctx.beginPath();
-    ctx.arc(lineCoords.x1, lineCoords.y1, 8, 0, 2 * Math.PI);
-    ctx.arc(lineCoords.x2, lineCoords.y2, 8, 0, 2 * Math.PI);
-    ctx.fillStyle = '#ff0055';
-    ctx.shadowBlur = 5;
-    ctx.shadowColor = '#ff0055';
-    ctx.fill();
-  };
-
-  // Redraw when snapshot loads or coordinates change
+  // Ensure backend preview is running when draw-line step is shown
   useEffect(() => {
-    if (step === 2 && snapshotUrl) {
-      const img = new Image();
-      img.src = snapshotUrl;
-      img.onload = () => {
-        imageRef.current = img;
-        const canvas = canvasRef.current;
-        if (canvas) {
-          canvas.width = img.naturalWidth || 640;
-          canvas.height = img.naturalHeight || 360;
-          drawCanvas();
+    if (step !== 2 || useLegacySnapshot || !cameraId) return undefined;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        await stopDvrPreview();
+        if (!cancelled) {
+          await startDvrPreview(cameraId);
         }
-      };
-    }
-  }, [step, snapshotUrl, lineCoords]);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('Failed to start preview for line drawing', err);
+        }
+      }
+    })();
 
-  // Translate click to canvas coordinates
-  const getCanvasCoords = (e) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-      x: Math.round((e.clientX - rect.left) * scaleX),
-      y: Math.round((e.clientY - rect.top) * scaleY)
+    return () => {
+      cancelled = true;
+      if (!useLegacySnapshot) {
+        stopDvrPreview().catch(() => {});
+      }
     };
-  };
-
-  const handleMouseDown = (e) => {
-    if (step !== 2) return;
-    const coords = getCanvasCoords(e);
-    setLineCoords(prev => ({
-      ...prev,
-      x1: coords.x,
-      y1: coords.y,
-      x2: coords.x,
-      y2: coords.y
-    }));
-    setIsDrawing(true);
-  };
-
-  const handleMouseMove = (e) => {
-    if (!isDrawing || step !== 2) return;
-    const coords = getCanvasCoords(e);
-    setLineCoords(prev => ({
-      ...prev,
-      x2: coords.x,
-      y2: coords.y
-    }));
-  };
-
-  const handleMouseUp = () => {
-    setIsDrawing(false);
-  };
+  }, [step, cameraId, useLegacySnapshot]);
 
   // Save the drawn line and start live stream
   const handleSaveLine = async () => {
     setLoading(true);
     setErrorMsg('');
     try {
+      await stopPreview();
+
       const cam = useCustomUrl 
         ? { rtsp: customUrl, channel_id: 'custom', camera_name: cameraName }
         : discoveredCameras[selectedCameraIndex] || { rtsp: 'demo', channel_id: cameraId, camera_name: cameraName };
       
+      const coords = lineDrawRef.current?.getLineCoords() || lineCoords;
+
       const finalConfig = {
         config_data: {
           cameras: [
@@ -278,7 +270,7 @@ const DvrConfiguration = ({ onBack }) => {
               id: cam.channel_id || cameraId,
               name: cam.camera_name || cameraName,
               rtsp_url: cam.rtsp,
-              line_coords: lineCoords,
+              line_coords: coords,
               window_size: 10
             }
           ]
@@ -299,7 +291,7 @@ const DvrConfiguration = ({ onBack }) => {
   };
 
   return (
-    <div className="dashboard-container" style={{ maxWidth: '900px' }}>
+    <div className="dashboard-container" style={{ maxWidth: '1280px' }}>
       <header className="dashboard-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <div>
           <h1 className="header-title" style={{ fontSize: '2.2rem' }}>DVR HMI Portal</h1>
@@ -331,6 +323,12 @@ const DvrConfiguration = ({ onBack }) => {
         </div>
       </div>
 
+      {sessionRestored && step === 1.5 && (
+        <div className="glass-panel" style={{ color: '#a7f3d0', border: '1px solid var(--accent-green)', background: 'rgba(16,185,129,0.1)', marginBottom: '20px', padding: '12px' }}>
+          ✓ DVR session restored — no re-login required.
+        </div>
+      )}
+
       {errorMsg && (
         <div className="glass-panel" style={{ color: '#fca5a5', border: '1px solid var(--accent-red)', background: 'rgba(239,68,68,0.1)', marginBottom: '20px', padding: '12px' }}>
           ⚠️ {errorMsg}
@@ -346,6 +344,36 @@ const DvrConfiguration = ({ onBack }) => {
       {/* Step 1: DVR Credentials / Direct URL Form */}
       {step === 1 && (
         <div className="glass-panel" style={{ animation: 'fadeIn 0.5s ease' }}>
+          {discoveredCameras.length > 0 && (
+            <div style={{
+              marginBottom: '20px',
+              padding: '14px 16px',
+              borderRadius: '10px',
+              background: 'rgba(16,185,129,0.1)',
+              border: '1px solid var(--accent-green)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}>
+              <div>
+                <div style={{ color: 'var(--accent-green)', fontWeight: 600, marginBottom: '4px' }}>
+                  DVR session active ({dvrIp})
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  {discoveredCameras.length} channel(s) available — continue without signing in again.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep(1.5)}
+                style={{ background: 'var(--accent-green)', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600 }}
+              >
+                Continue to Channels &rarr;
+              </button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '20px', borderBottom: '1px solid var(--glass-border)', paddingBottom: '12px', marginBottom: '20px' }}>
             <h2 style={{ margin: 0, fontSize: '1.4rem', flex: 1 }}>DVR Connection Settings</h2>
             <div style={{ display: 'flex', background: 'rgba(0,0,0,0.2)', padding: '4px', borderRadius: '8px', border: '1px solid var(--glass-border)' }}>
@@ -523,15 +551,14 @@ const DvrConfiguration = ({ onBack }) => {
             Click and drag directly on the frame snapshot below to draw the line where people are counted entering or exiting. 
           </p>
 
-          <div style={{ border: '2px dashed var(--glass-border)', borderRadius: '12px', overflow: 'hidden', display: 'inline-block', position: 'relative', background: '#000', cursor: 'crosshair', maxWidth: '100%' }}>
-            <canvas 
-              ref={canvasRef}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
-            />
-          </div>
+          <LineDrawViewer
+            key={cameraId}
+            ref={lineDrawRef}
+            channelId={cameraId}
+            snapshotUrl={snapshotUrl}
+            useLegacySnapshot={useLegacySnapshot}
+            initialLineCoords={lineCoords}
+          />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px' }}>
             <button 
@@ -562,11 +589,11 @@ const DvrConfiguration = ({ onBack }) => {
             </div>
           </div>
           
-          <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--glass-border)', background: '#000', marginBottom: '20px', position: 'relative', aspectRatio: '16/9' }}>
+          <div style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--glass-border)', background: '#000', marginBottom: '20px', position: 'relative', minHeight: '480px', maxHeight: '75vh', aspectRatio: '16/9' }}>
             <img 
               src={`http://${API_HOST}:8000/stream/${cameraId}?t=${Date.now()}`}
               alt="CCTV AI Processing Live Stream" 
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              style={{ width: '100%', height: '100%', minHeight: '480px', objectFit: 'contain' }}
               onError={(e) => {
                 e.target.style.display = 'none';
                 e.target.parentElement.innerHTML = '<div style="color:var(--text-secondary);display:flex;align-items:center;justify-content:center;height:100%;">AI stream loading/disconnected. Make sure Python service is running.</div>';
